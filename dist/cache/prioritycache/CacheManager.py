@@ -2,7 +2,7 @@
 """"
 Cache-n-DASH: A Caching Framework for DASH video streaming. 
 
-Authors: Parikshit Juluri, Sheyda Kiyani Meher, Rohit Abhishek
+Authors: Parikshit Juluri, Sheyda Kiani Mehr, Rohit Abhishek
 Institution: University of Missouri-Kansas City
 Contact Email: pjuluri@umkc.edu
     
