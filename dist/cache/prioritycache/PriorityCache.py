@@ -15,7 +15,11 @@ def get_segment_local_path(segment_path):
 
 def download_segment(segment_path):
     """ Function to download the segment"""
-    segment_url = config_cdash.CONTENT_SERVER + segment_path
+    if "Big" in segment_path:
+        segment_url = config_cdash.CONTENT_SERVER + config_cdash.SERVER[0]+ segment_path
+    elif "Eleph" in segment_path:
+        segment_url = config_cdash.CONTENT_SERVER + config_cdash.SERVER[1]+segment_path
+    #segment_url = config_cdash.CONTENT_SERVER + segment_path
     local_filepath = get_segment_local_path(segment_path)
     return download_file(segment_url, local_filepath)
 
