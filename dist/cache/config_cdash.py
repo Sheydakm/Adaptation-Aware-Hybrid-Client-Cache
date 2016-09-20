@@ -31,7 +31,7 @@ from time import strftime
 # CACHE Server Parameters
 HOSTNAME = 'localhost'
 PORT_NUMBER = 8001
-MPD_SOURCE_LIST = ['BigBuckBunny_4s_simple_2014_05_09.mpd', 'mpd/BigBuckBunny_4s.mpd']
+MPD_SOURCE_LIST = ['BigBuckBunny_4s_simple_2014_05_09.mpd', 'mpd/BigBuckBunny_4s.mpd','ElephantsDream_4s_simple_2014_05_09.mpd','mpd/ElephantsDream_4s_4s.mpd']
 CWD = os.getcwd()
 
 MPD_DICT_JSON_FILE = os.path.join(CWD, 'MPD_DICT.json')
@@ -42,7 +42,9 @@ if not os.path.exists(MPD_FOLDER):
 FETCH_CODE = 'FETCH'
 PREFETCH_CODE = 'PRE-FETCH'
 #CONTENT_SERVER = 'http://www-itec.uni-klu.ac.at/ftp/datasets/DASHDataset2014/BigBuckBunny/4sec/'
-CONTENT_SERVER = 'http://127.0.0.1/media/BigBuckBunny/4sec/'
+CONTENT_SERVER = 'http://www-itec.uni-klu.ac.at/ftp/datasets/DASHDataset2014/'
+SERVER =['BigBuckBunny/4sec/','ElephantsDream/4sec/']
+#CONTENT_SERVER = 'http://127.0.0.1/media/BigBuckBunny/4sec/'
 VIDEO_FOLDER = os.path.join(CWD, 'Videos')
 VIDEO_FILE_EXTENTION = 'm4s'
 if not os.path.exists(VIDEO_FOLDER):
