@@ -97,7 +97,11 @@ class MyHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             config_cdash.LOG.info("MPD: not in cache. Retrieving from Content server".format(request))
             # if mpd is in content server save it in cache server and put it in MPD_DICT and json file
             mpd_headers = None
-            mpd_url = config_cdash.CONTENT_SERVER + request
+            #mpd_url = config_cdash.CONTENT_SERVER + request
+            if "Big" in request:
+                mpd_url = config_cdash.CONTENT_SERVER +config_cdash.SERVER[0]+ request
+            else:
+                mpd_url = config_cdash.CONTENT_SERVER +config_cdash.SERVER[1]+ request
             try:
                 content_server_response = urllib2.urlopen(mpd_url)
                 mpd_headers = content_server_response.headers
