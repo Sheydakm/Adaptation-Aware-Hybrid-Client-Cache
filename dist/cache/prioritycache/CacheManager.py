@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """"
 Cache-n-DASH: A Caching Framework for DASH video streaming. 
 
@@ -32,6 +31,17 @@ from PriorityCache import PriorityCache
 import config_cdash
 import Queue
 import sqlite3
+#from cache_server import throughput_client
+
+D_CONN = None
+cursor_d= None
+
+class CheckableQueue(Queue.Queue):
+    """ Extending Queue to be able to check for existing values
+    """
+    def __contains__(self, item):
+        with self.mutex:
+            return item in self.queue
 
 
 class CacheManager():
@@ -43,8 +53,9 @@ class CacheManager():
         self.prefetch_request_count = 0
         config_cdash.LOG.info('Initializing the Cache Manager')
         self.cache = PriorityCache(cache_size)
-        self.prefetch_queue = Queue.Queue()
-        self.current_queue = Queue.Queue()
+        self.prefetch_queue = CheckableQueue()
+        self.backup_prefetch_queue = CheckableQueue()
+        self.current_queue = CheckableQueue()
         self.stop = threading.Event()
         self.current_thread = threading.Thread(target=self.current_function, args=())
         self.current_thread.daemon = True
@@ -54,6 +65,7 @@ class CacheManager():
         self.prefetch_thread.daemon = True
         self.prefetch_thread.start()
         config_cdash.LOG.info('Started the Preftech thread')
+        self.list_data=[]
 
     def terminate(self):
         self.stop.set()
@@ -63,12 +75,22 @@ class CacheManager():
     def fetch_file(self, file_path, username=None,session_id=None):
         """ Module to get the file """
         config_cdash.LOG.info('Fetching the file {}'.format(file_path))
-        # Add the current request to the current_thread
-        # This is to ensure that the pre-fetch process does not hold the
+        n=self.backup_prefetch_queue.qsize()
+        config_cdash.LOG.info('size of backup_prefetch_queue {} '.format(n))
+        if n!=0:
+            #item = self.backup_prefetch_queue.get()
+            #config_cdash.LOG.info('item {}'.format(item))
+            #config_cdash.LOG.info('size of backup_prefetch_queue {} '.format(n))
+            while file_path in self.backup_prefetch_queue.queue and not segment_exists(file_path):
+                config_cdash.LOG.warning('Witing untill Prefetch is complete')
+                time.sleep(1)
+                continue
+            if file_path not in self.backup_prefetch_queue.queue and not segment_exists(file_path):
+                config_cdash.LOG.warning('the request is not prefetched yet and not in the cache')
 
         local_filepath, http_headers = self.cache.get_file(file_path, config_cdash.FETCH_CODE)
         config_cdash.LOG.info('Added {} to current queue'.format(file_path))
-        self.current_queue.put((file_path, username, session_id))
+        #self.current_queue.put((file_path, username, session_id))
         self.fetch_requests += 1
         config_cdash.LOG.info('Total fetch Requests = {}'.format(self.fetch_requests))
         return local_filepath, http_headers
@@ -92,17 +114,54 @@ class CacheManager():
                 continue
             # Determining the next bitrates and adding to the prefetch list
             if current_request:
-                throughput = get_throughput_info(username, session_id, config_cdash.LIMIT, config_cdash.SCHEME)
-                config_cdash.LOG.info('this is avarage of throughput: = {}'.format(throughput))
-                prefetch_request, prefetch_bitrate = get_prefetch(current_request, config_cdash.PREFETCH_SCHEME, throughput)
+                if config_cdash.PREFETCH_SCHEME == 'SMART':
+                    a=0.8
+                    d=0.2
+                    config_cdash.LOG.info('smart')
+                    throughput_client= self.get_throughput_client(username, session_id)
+                    if throughput_client== None:
+                        config_cdash.LOG.info('throughput client:=None')
+                        throughput= self.get_throughput_info(username, session_id, config_cdash.LIMIT, config_cdash.SCHEME)
+                        config_cdash.LOG.info('average of throughput: = {}'.format(throughput))
+                        forecast_throughput=throughput
+                        self.insert_forecast(username, session_id,0.0)
+                        self.insert_trend(username, session_id,0.0)
+                        config_cdash.LOG.info('forecast throughput equal throughput:= {}'.format(forecast_throughput))
+                        prefetch_request, prefetch_bitrate = get_prefetch(current_request, config_cdash.PREFETCH_SCHEME,forecast_throughput)
+                    else:
+                        config_cdash.LOG.info('throughput client:= {}'.format(throughput_client))
+                        At_1=float(throughput_client)
+                        config_cdash.LOG.info('type of At_1:= {}'.format(type(At_1)))
+                        FIT_t_1=self.get_previous_forecast(username, session_id)
+                        config_cdash.LOG.info('previous forecast:= {}'.format(FIT_t_1))
+                        config_cdash.LOG.info('type of FIT_t_1:= {}'.format(type(FIT_t_1)))
+                        Tt_1=self.get_previous_trend(username, session_id)
+                        config_cdash.LOG.info('previous trend:= {}'.format(Tt_1))
+                        config_cdash.LOG.info('type of Tt_1:= {}'.format(type(Tt_1)))
+                        Ft=FIT_t_1+a*(At_1-FIT_t_1)
+                        Tt=Tt_1+d*(Ft-FIT_t_1)
+                        FIT_t=Ft+Tt
+                        self.insert_forecast(username, session_id,FIT_t)
+                        self.insert_trend(username, session_id,Tt)
+                        config_cdash.LOG.info('forecast throughput: {}'.format(FIT_t))
+                        prefetch_request, prefetch_bitrate = get_prefetch(current_request, config_cdash.PREFETCH_SCHEME,FIT_t)
+                else:
+                    prefetch_request, prefetch_bitrate = get_prefetch(current_request, config_cdash.PREFETCH_SCHEME, None)
+                    config_cdash.LOG.info('not smart')
             if not segment_exists(prefetch_request):
+                config_cdash.LOG.info('Segment not there {}'.format(prefetch_request))
                 if check_content_server(prefetch_request):
+                    t=type(prefetch_request)
+                    config_cdash.LOG.info('Type will be saved in queue: {}'.format(t))
                     config_cdash.LOG.info('Current Thread: Current segment: {}, Next segment: {}'.format(current_request,
                                                                                                   prefetch_request))
                     self.prefetch_queue.put(prefetch_request)
+                    self.backup_prefetch_queue.put(prefetch_request)
                     config_cdash.LOG.info('Pre-fetch queue count = {}'.format(self.prefetch_queue.qsize()))
                 else:
                     config_cdash.LOG.info('Current Thread: Invalid Next segment: {}'.format(current_request, prefetch_request))
+            else:
+                config_cdash.LOG.info('Segment already there {}'.format(prefetch_request))
         else:
             config_cdash.LOG.warning('Current Thread: terminated')
 
@@ -120,6 +179,7 @@ class CacheManager():
                 config_cdash.LOG.error('Could not read from the Pre-fetch queue')
                 time.sleep(config_cdash.WAIT_TIME)
                 continue
+            #config_cdash.LOG.info('user {} Pre-fetching the segment: {}'.format(username,prefetch_request))
             config_cdash.LOG.info('Pre-fetching the segment: {}'.format(prefetch_request))
             self.cache.get_file(prefetch_request, config_cdash.PREFETCH_CODE)
             self.prefetch_request_count += 1
@@ -128,18 +188,48 @@ class CacheManager():
             config_cdash.LOG.warning('Pre-fetch thread terminated')
 
 
-def get_throughput_info(username, session_id, limit, scheme):
-    # TODO: Get the throughput from the database
-    # Testing with the lowest value
-    TH_CONN = sqlite3.connect(config_cdash.THROUGHPUT_DATABASE)
-    cursor = TH_CONN.cursor()
-    if scheme == 'average':
-        if limit == 0 :
-            cursor.execute('SELECT AVG(THROUGHPUT) FROM THROUGHPUTDATA WHERE SESSIONID = ? AND USERNAME = ?;', (session_id, username))
-        else:
-            cursor.execute('SELECT AVG(THROUGHPUT) FROM THROUGHPUTDATA WHERE SESSIONID = ? AND USERNAME = ? ORDER BY ENTRYID DESC LIMIT ?;', (session_id, username, limit))
-    elif scheme == 'HM':
-        cursor.execute('SELECT COUNT(*)/SUM(1/THROUGHPUT) FROM THROUGHPUTDATA WHERE SESSIONID = ? AND USERNAME = ? ORDER BY ENTRYID DESC LIMIT ?;', (session_id, username, limit))
-    else:
-        config_cdash.LOG.warning('print "no scheme!')
-    return cursor.fetchall()
+    def get_throughput_info(self,username, session_id, limit, scheme='average'):
+        last_row_tuple=self.list_data[-1]
+        config_cdash.LOG.info('last row = {}'.format(last_row_tuple))
+        cache_throughput=last_row_tuple[5]
+        return cache_throughput
+
+
+    def get_throughput_client(self,username, session_id):
+        last_row_tuple=self.list_data[-1]
+        config_cdash.LOG.info('last row = {}'.format(last_row_tuple))
+        client_throughput=last_row_tuple[6]
+        return client_throughput
+
+    def insert_forecast(self,username, session_id,forecast):
+        last_row_tuple=self.list_data[-1]
+        config_cdash.LOG.info('last row = {}'.format(last_row_tuple))
+        last_row=list(last_row_tuple)
+        last_row[8]=forecast
+        last_row_tuple=tuple(last_row)
+        config_cdash.LOG.info('last row = {}'.format(last_row_tuple))
+        self.list_data[-1]=last_row_tuple
+        #config_cdash.LOG.info('list_data= {}'.format(self.list_data))
+
+    def get_previous_forecast(self,username, session_id):
+        previous_row_tuple=self.list_data[-2]
+        config_cdash.LOG.info('previos row = {}'.format(previous_row_tuple))
+        forecast=previous_row_tuple[8]
+        return forecast
+
+    def insert_trend(self,username, session_id,trend):
+        last_row_tuple=self.list_data[-1]
+        config_cdash.LOG.info('last row = {}'.format(last_row_tuple))
+        last_row=list(last_row_tuple)
+        last_row[7]=trend
+        last_row_tuple=tuple(last_row)
+        config_cdash.LOG.info('last row = {}'.format(last_row_tuple))
+        self.list_data[-1]=last_row_tuple
+        #config_cdash.LOG.info('list_data= {}'.format(self.list_data))
+
+    def get_previous_trend(self,username, session_id):
+        previous_row_tuple=self.list_data[-2]
+        config_cdash.LOG.info('previous row = {}'.format(previous_row_tuple))
+        trend=previous_row_tuple[7]
+        return trend
+

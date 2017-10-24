@@ -6,12 +6,25 @@ import glob
 import os
 import config_cdash
 
+def get_segment_local_path(segment_path):
+    """ Module to get the path of the segment on the local harddisk"""
+    segment_filename = segment_path.replace('/', '-')
+    local_filepath = os.path.join(config_cdash.VIDEO_FOLDER, segment_filename)
+    return local_filepath
+
 
 def download_segment(segment_path):
     """ Function to download the segment"""
-    segment_url = config_cdash.CONTENT_SERVER + segment_path
-    segment_filename = segment_path.replace('/', '-')
-    local_filepath = os.path.join(config_cdash.VIDEO_FOLDER, segment_filename)
+    #segment_url = config_cdash.CONTENT_SERVER + segment_path
+    if "Big" in segment_path:
+        segment_url = config_cdash.CONTENT_SERVER + config_cdash.SERVER[0]+ segment_path
+    elif "Elephants" in segment_path:
+        segment_url = config_cdash.CONTENT_SERVER + config_cdash.SERVER[1]+segment_path
+    elif "OfForest" in segment_path:
+        segment_url = config_cdash.CONTENT_SERVER + config_cdash.SERVER[2]+segment_path
+    elif "Tears" in segment_path:
+        segment_url = config_cdash.CONTENT_SERVER + config_cdash.SERVER[3]+segment_path
+    local_filepath = get_segment_local_path(segment_path)
     return download_file(segment_url, local_filepath)
 
 
@@ -19,6 +32,23 @@ class Counter(dict):
     """Dictionary where the default value is 0"""
     def __missing__(self, key):
         return 0
+
+
+def remove_file(segment_path):
+    """ Module to delete file from the harddisk"""
+    # TDOD: Configure for MPD files as well
+    if config_cdash.VIDEO_FILE_EXTENTION in segment_path:
+        local_filepath = get_segment_local_path(segment_path)
+        try:
+            os.remove(local_filepath)
+            config_cdash.LOG.info("Deleteing segment {} from harddisk".format(local_filepath))
+        except OSError:
+            config_cdash.LOG.error('Unable to delete video file {} from cache'.format(local_filepath))
+    else:
+        try:
+             os.remove(local_filepath)
+        except OSError:
+            config_cdash.LOG.error('Unable to delete unknown file {} from cache'.format(local_filepath))
 
 
 class PriorityCache():
@@ -30,7 +60,10 @@ class PriorityCache():
     """
     def __init__(self, maxsize):
         self.cache = {}
+        # Creating a queue for the FIFO cache
         self.cache_queue = collections.deque()
+        # Creating a dict for the weighted cache
+        self.cache_dict = collections.defaultdict(int)
         # order that keys have been used
         self.maxsize = maxsize
         self.maxqueue = maxsize * 10
@@ -56,11 +89,17 @@ class PriorityCache():
         """ Get the file from the cache.
         If not get it from the content server
         """
+        config_cdash.LOG.info("code = {}".format(code))
+        # config_cdash.LOG.info('Current Cache Dict= {}'.format(self.cache.keys()))
         try:
             local_filepath, http_headers = self.cache[key]
+            try:
+                self.cache_dict[key] += 1
+            except KeyError:
+                self.cache_dict[key] = 1
             if code == config_cdash.FETCH_CODE:
                 self.fetch_hits += 1
-                config_cdash.LOG.info('Fetch hit count = {} Fetch hit: {}'.format(self.fetch_hits, key))
+                config_cdash.LOG.info('Fetch hit count = {} Fetch : {}'.format(self.fetch_hits, key))
             elif code == config_cdash.PREFETCH_CODE:
                 self.prefetch_hits += 1
                 config_cdash.LOG.info('Prefetch hit count = {}. Prefetch hit: {}'.format(self.prefetch_hits, key))
@@ -68,21 +107,22 @@ class PriorityCache():
             # The file is not in the cache.
             # Need to fetch from content server
             # TODO: Check if the request is valid (Use Rohit's code)
-            local_filepath, http_headers = download_segment(key)
             if key not in self.cache:
+                local_filepath, http_headers = download_segment(key)
                 self.cache[key] = (local_filepath, http_headers)
                 self.cache_queue.append(key)
                 config_cdash.LOG.info('Adding key {} to cache'.format(key))
+                if code == config_cdash.FETCH_CODE:
+                    self.misses += 1
+                    config_cdash.LOG.info('Cache miss: count = {},{}'.format(self.misses, key))
             else:
+                local_filepath, http_headers = self.cache[key]
                 config_cdash.LOG.info('key {} already in Cache'.format(key))
-            while True:
-                if len(self.cache) > self.maxsize:
-                    self.pop_cache()
-                else:
-                    break
-            self.misses += 1
-            config_cdash.LOG.info('Cache miss: count = {},{}'.format(self.misses, key))
-        config_cdash.LOG.info('Current cache: {}'.format(self.cache))
+            #while True:
+            #    if len(self.cache) > self.maxsize:
+            #        self.pop_cache()
+            #    else:
+            #        break
         return local_filepath, http_headers
 
     def pop_cache(self):
@@ -92,9 +132,30 @@ class PriorityCache():
         key = self.cache_queue.popleft()
         try:
             del self.cache[key]
+            remove_file(key)
             config_cdash.LOG.info('Deleted Key {} from Cache'.format(key))
         except KeyError:
             config_cdash.LOG.error('Key {} not found in Cache'.format(key))
+
+    def pop_dict(self):
+        """
+        Module to remove an element from the dict
+        :param self:
+        :return:
+        """
+        lowest_value = min(self.cache_dict.values())
+        for key in self.cache_dict:
+            if self.cache_dict[key] == lowest_value:
+                try:
+                    del self.cache_dict[key]
+                except KeyError:
+                    config_cdash.LOG.error('Could not find key: {} in cache_dict'.format(key))
+                try:
+                    del self.cache[key]
+                except KeyError:
+                    config_cdash.LOG.error('Could not find key: {} in cache'.format(key))
+                config_cdash.LOG.info('Deleting key {}'.format(key))
+                break
 
     def clear(self):
             self.cache.clear()

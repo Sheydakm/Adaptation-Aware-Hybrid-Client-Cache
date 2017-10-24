@@ -29,37 +29,55 @@ import logging
 from time import strftime
 
 # CACHE Server Parameters
-HOSTNAME = 'localhost'
+HOSTNAME = '10.10.3.1'
 PORT_NUMBER = 8001
-MPD_SOURCE_LIST = ['BigBuckBunny_4s_simple_2014_05_09.mpd']
-MPD_DICT_JSON_FILE = 'C:\\Users\\pjuluri\\Desktop\\Videos\\MPD_DICT.json'
-MPD_FOLDER = 'C:\\Users\\pjuluri\\Desktop\\MPD_FILES\\'
+MPD_SOURCE_LIST = ['BigBuckBunny_4s_simple_2014_05_09.mpd', 'mpd/BigBuckBunny_4s.mpd','ElephantsDream_4s_simple_2014_05_09.mpd','mpd/ElephantsDream_4s.mpd','OfForestAndMen_4s_simple_2014_05_09.mpd','mpd/OfForestAndMen_4s.mpd','TearsOfSteel_4s_simple_2014_05_09.mpd','mpd/TearsOfSteel_4s.mpd']
+CWD = os.getcwd()
+
+MPD_DICT_JSON_FILE = os.path.join(CWD, 'MPD_DICT.json')
+MPD_FOLDER = os.path.join(CWD, 'MPD_FILES')
+if not os.path.exists(MPD_FOLDER):
+    os.makedirs(MPD_FOLDER)
 # Parameters for the priority cache
 FETCH_CODE = 'FETCH'
 PREFETCH_CODE = 'PRE-FETCH'
-CONTENT_SERVER = 'http://www-itec.uni-klu.ac.at/ftp/datasets/DASHDataset2014/BigBuckBunny/4sec/'
-VIDEO_FOLDER = 'C:\\Users\\pjuluri\\Desktop\\Videos\\'
+#CONTENT_SERVER = 'http://www-itec.uni-klu.ac.at/ftp/datasets/DASHDataset2014/BigBuckBunny/4sec/'
+#CONTENT_SERVER = 'http://127.0.0.1/media/BigBuckBunny/4sec/'
+CONTENT_SERVER = 'http://10.10.2.1/www-itec.uni-klu.ac.at/ftp/datasets/DASHDataset2014/'
+SERVER =['BigBuckBunny/4sec/','ElephantsDream/4sec/','OfForestAndMen/4sec/','TearsOfSteel/4sec']
+VIDEO_FOLDER = os.path.join(CWD, 'Videos')
+VIDEO_FILE_EXTENTION = 'm4s'
+if not os.path.exists(VIDEO_FOLDER):
+    os.makedirs(VIDEO_FOLDER)
+else:
+    print "Clearing the Cache"
+    import glob
+    video_match = os.path.join(VIDEO_FOLDER, "*")
+    video_list = glob.glob(video_match)
+    for video_file in video_list:
+        os.remove(video_file)
+
 CACHE_LIMIT = 100
-PREFETCH_LIMIT = 100
-# PREFETCH_SCHEME = 'BASIC'
-PREFETCH_SCHEME = 'SMART'
+#PREFETCH_LIMIT = 100
+PREFETCH_SCHEME = 'BASIC'
+#PREFETCH_SCHEME = 'SMART'
 CURRENT_THREAD = True
 PREFETCH_THREAD = True
 
-#DB
-# LIMIT can be 0 or any number
-LIMIT = 5
-# SCHEME can be 'average' or 'HM'
-SCHEME = 'average'
-#CACHE_DATABASE = 'C:\\Users\\pjuluri\\Desktop\\Cache_db.db'
+# The number of previous samples to be considered, If set as None then all samples are considered
+# Throughput measurement limits
+LIMIT = 10
+# The throughput average scheme to be considered. Could be 'average' or 'harmonic_mean'
+SCHEME ='average'
+#SCHEME = 'harmonic_mean'
 TABLE_RETRY_TIME = 5
 
-TABLE_LIST = ["CREATE TABLE Prefetch(Segment Text, Weightage INT)",
-              "CREATE TABLE Current(Segment Text)"]
-
 # We store the throughput values in a local database
-#THROUGHPUT_DATABASE = "C:\\Users\\pjuluri\\Desktop\\Throughput_db\\throughput_{}.db".format(time.strftime("%Y-%m-%d_%H_%M_%S"))
-THROUGHPUT_DATABASE = "throughput.db"
+THROUGHPUT_DATABASE_FOLDER = os.path.join(CWD, 'Throughput_db')
+if not os.path.exists(THROUGHPUT_DATABASE_FOLDER):
+    os.makedirs(THROUGHPUT_DATABASE_FOLDER)
+THROUGHPUT_DATABASE = "throughput_{}.db".format(time.strftime("%Y-%m-%d_%H_%M_%S"))
+THROUGHPUT_DATABASE = os.path.join(THROUGHPUT_DATABASE_FOLDER, THROUGHPUT_DATABASE)
 THROUGHPUT_TABLES = ["CREATE TABLE THROUGHPUTDATA("
                      "ENTRYID TIMESTAMP, "
                      "USERNAME Text,"
@@ -67,7 +85,22 @@ THROUGHPUT_TABLES = ["CREATE TABLE THROUGHPUTDATA("
                      "REQUESTID INTEGER PRIMARY KEY,"
                      "REQUESTSIZE FLOAT,"
                      "REQUESTTIME FLOAT,"
-                     "THROUGHPUT FLOAT);"]
+                     "THROUGHPUT FLOAT,"
+                     "C_THROUGHPUT FLOAT,"
+                     "TREND FLOAT,"
+                     "FORECAST FLOAT);"]
+
+#DELTA_DATABASE_FOLDER = os.path.join(CWD, 'delta_db')
+#if not os.path.exists(DELTA_DATABASE_FOLDER):
+#    os.makedirs(DELTA_DATABASE_FOLDER)
+#DELTA_DATABASE = "delta_{}.db".format(time.strftime("%Y-%m-%d_%H_%M_%S"))
+#DELTA_DATABASE = os.path.join(DELTA_DATABASE_FOLDER, DELTA_DATABASE)
+#DELTA_TABLES = ["CREATE TABLE DELTA("
+#                     "ENTRYID TIMESTAMP, "
+#                     "USERNAME Text,"
+#                     "SESSIONID Text,"
+#                     "REQUESTID INTEGER PRIMARY KEY,"
+#                     "DELTA FLOAT);"]
 
 # Cache Logging
 LOG_NAME = 'cache_LOG'
@@ -75,7 +108,7 @@ LOG_NAME = 'cache_LOG'
 LOG_LEVEL = logging.INFO
 
 # Initialize the Log Folders
-LOG_FOLDER = "C:\\Users\\pjuluri\\Desktop\\Cache_LOGS\\"
+LOG_FOLDER = os.path.join(CWD, "Cache_LOGS")
 if not os.path.exists(LOG_FOLDER):
     os.makedirs(LOG_FOLDER)
 LOG_FILENAME = os.path.join(LOG_FOLDER, strftime('cache_n_dash_LOG_{}_%Y-%m-%d.%H_%M_%S.log'.format(PREFETCH_SCHEME)))
@@ -120,13 +153,13 @@ VIDEO_CACHE_CONTENT = {
             'string-match': 'TearsOfSteel_4s_'}
 }
 
-
 # Throughput Based Adaptation
 # WARNING: MAKE SURE YOU CHANGE THESE IN THE CLIENT AS WELL
 # TODO: Set these parameters at the start. (MPD or cookies??)
 BASIC_THRESHOLD = 10
 BASIC_UPPER_THRESHOLD = 1.2
+BASIC_LOWER_THRESHOLD = 0.8
 # Number of segments for moving average
-BASIC_DELTA_COUNT = 5
+BASIC_DELTA_COUNT = 10
 MAX_BUFFER_SIZE = 60
 INITIAL_BUFFERING_COUNT = 2

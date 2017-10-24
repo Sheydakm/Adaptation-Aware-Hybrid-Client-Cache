@@ -20,25 +20,43 @@ def get_prefetch(video_request, pre_fetch_scheme, throughput):
         next_segment = '1'
         next_bitrate = available_bitrates[0]
     elif 'SMART' in pre_fetch_scheme.upper():
-        # Check if we need to increase or decrease bitrate
         config_cdash.LOG.info('Pre-fetch with SMART throughput = {}'.format(throughput))
         if throughput > current_bitrate * config_cdash.BASIC_UPPER_THRESHOLD:
+            config_cdash.LOG.info('SMART throughput > 1.2* current bitrate= {},{}'.format(throughput,current_bitrate * config_cdash.BASIC_UPPER_THRESHOLD))
             if current_bitrate == available_bitrates[-1]:
                 next_bitrate = current_bitrate
+                config_cdash.LOG.info('Sticking to max:')
             else:
-                # if the bitrate is not at maximum then select the next higher bitrate
-                try:
+                config_cdash.LOG.info('not the last bitrate')
+                try:    
                     current_index = available_bitrates.index(current_bitrate)
                     next_bitrate = available_bitrates[current_index + 1]
+                    if throughput < next_bitrate * config_cdash.BASIC_UPPER_THRESHOLD:
+                        config_cdash.LOG.info('SMART throughput <= 1.2* next bitrate= {},{}'.format(throughput,next_bitrate * config_cdash.BASIC_UPPER_THRESHOLD))
+                        next_bitrate = current_bitrate
+                    else:
+                        config_cdash.LOG.info('Increasing bitrate')
                 except ValueError:
                     current_index = available_bitrates[0]
+                    config_cdash.LOG.info('first bitrate for error')
         else:
+            config_cdash.LOG.info('SMART throughput <= 1.2* current bitrate= {},{}'.format(throughput,current_bitrate * config_cdash.BASIC_UPPER_THRESHOLD))
+            if current_bitrate==available_bitrates[-1]:
+                if throughput > current_bitrate * config_cdash.BASIC_LOWER_THRESHOLD:
+                    next_bitrate = current_bitrate
+                    config_cdash.LOG.info('Sticking to max neverrrrrrrrrrrrrrrrrrr')
             for index, bitrate in enumerate(available_bitrates[1:], 1):
-                if throughput > bitrate * config_cdash.BASIC_UPPER_THRESHOLD:
-                    next_bitrate = bitrate
+                config_cdash.LOG.info('not the last bitrate')
+                if bitrate >= current_bitrate and throughput < bitrate * config_cdash.BASIC_UPPER_THRESHOLD:
+                     next_bitrate = current_bitrate
+                     # do not use current bitrate to avoid oscillations
+                     break
+                if throughput >= bitrate * config_cdash.BASIC_UPPER_THRESHOLD:
+                     next_bitrate = bitrate
                 else:
                     next_bitrate = available_bitrates[index - 1]
-                break
+                    config_cdash.LOG.info('Decreasing bitrate')
+                    break
     else:
         config_cdash.LOG.info('Pre-fetch with BASIC')
         next_bitrate = current_bitrate

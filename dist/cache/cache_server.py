@@ -34,14 +34,13 @@ import hashlib
 import json
 import config_cdash
 import time
-import timeit
-import datetime
 from os import stat
 import threading
 from prioritycache import CacheManager
 import configure_cdash_log
 from prioritycache.cache_module import check_content_server
 import create_db
+import datetime
 
 # Active state data structures
 MPD_DICT = {}
@@ -50,28 +49,60 @@ USER_DICT_LOCK = threading.Lock()
 USER_DICT = {}
 
 TH_CONN = None
+#D_CONN=None
 cache_manager = None
 # HTTP CODES
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
-
-
+client_throughput = None
 class MyHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
     """HTTPHandler to serve the video"""
     # check if MPD_DICT file in cache exists
     def do_GET(self):
+  
         """Function to handle the get message"""
+        start_time=time.time()
+        config_cdash.LOG.info('T2 = {}'.format(start_time))
         entry_id = username = session_id = request_id = "NULL"
-        request_size = throughput = request_time = "NULL"
+        request_size = throughput = request_time=request_t =time_c= "NULL"
+        segment_size=seg_time="NULL"
         try:
             username = self.headers['Username']
+            config_cdash.LOG.info("username {}".format(username))
             session_id = self.headers['Session-ID']
+            config_cdash.LOG.info("Session-ID {}".format(session_id))
+            if self.headers['Time']:
+                time_c=self.headers['Time']
+            else:
+                time_c=0
+            config_cdash.LOG.info("time_c {}".format(time_c))
+            global client_throughput
+            client_throughput=self.headers['Throughput']
+            if client_throughput==None:
+                client_throughput=0.0
+            if client_throughput=='NULL':
+                client_throughput=0.0
+            config_cdash.LOG.info("Client Throughput {}".format(client_throughput))
+            segment_size = self.headers['segment_size']
+            config_cdash.LOG.info("segment_size {}".format(segment_size))
+            seg_time = self.headers['seg_time']
+            config_cdash.LOG.info("seg_time {}".format(seg_time))
+            #global client_throughput
+            #client_throughput=self.headers['Throughput']
+            #if client_throughput==None:
+            #    client_throughput=0.0
+            #if client_throughput=='NULL':
+            #    client_throughput=0.0
+            #config_cdash.LOG.info("Client Throughput {}".format(client_throughput))
         except KeyError:
             config_cdash.LOG.warning('Could not find the username or session-ID for request from host:{}'.format(
                 self.client_address))
-
+        #start_time=time.time()
+        #config_cdash.LOG.info('T2 = {}'.format(start_time))
+        #s_time=str(datetime.datetime.time(datetime.datetime.now()))
         global MPD_DICT
         request = self.path.strip("/").split('?')[0]
+        config_cdash.LOG.info("Received request {}".format(request))
         # check if mpd file requested is in Cache Server (dictionary)
         if request in MPD_DICT:
             config_cdash.LOG.info('Found MPD in MPD_DICT')
@@ -86,10 +117,12 @@ class MyHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.end_headers()
 
             with open(local_mpd_path, 'rb') as request_file:
-                start_time = timeit.default_timer()
+                #start_time = timeit.default_timer()
                 self.wfile.write(request_file.read())
                 # Elapsed time in seconds
-                request_time = timeit.default_timer() - start_time
+                T3=time.time()
+                request_t = T3 - start_time
+                config_cdash.LOG.info('T3 = {}'.format(T3))
                 config_cdash.LOG.info('Served the MPD file from the cache server')
             request_size = stat(local_mpd_path).st_size
 
@@ -97,7 +130,15 @@ class MyHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             config_cdash.LOG.info("MPD: not in cache. Retrieving from Content server".format(request))
             # if mpd is in content server save it in cache server and put it in MPD_DICT and json file
             mpd_headers = None
-            mpd_url = config_cdash.CONTENT_SERVER + request
+            if "Big" in request:
+                mpd_url = config_cdash.CONTENT_SERVER +config_cdash.SERVER[0]+ request
+            elif "Elephants" in request:
+                mpd_url = config_cdash.CONTENT_SERVER +config_cdash.SERVER[1]+ request
+            elif "OfForest" in request:
+                mpd_url = config_cdash.CONTENT_SERVER +config_cdash.SERVER[2]+ request
+            elif "Tears" in request:
+                mpd_url = config_cdash.CONTENT_SERVER +config_cdash.SERVER[3]+ request
+            #mpd_url = config_cdash.CONTENT_SERVER + request
             try:
                 content_server_response = urllib2.urlopen(mpd_url)
                 mpd_headers = content_server_response.headers
@@ -117,10 +158,12 @@ class MyHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.end_headers()
 
             with open(local_mpd_path, 'rb') as request_file:
-                start_time = timeit.default_timer()
+                #start_time = timeit.default_timer()
                 self.wfile.write(request_file.read())
                 # Elapsed time in seconds
-                request_time = timeit.default_timer() - start_time
+                T3=time.time()
+                request_t = T3 - start_time
+                config_cdash.LOG.info('T3 = {}'.format(T3))
             # file_size in bytes
             request_size = stat(local_mpd_path).st_size
             config_cdash.LOG.info('Served MPD file:{}'.format(local_mpd_path))
@@ -133,16 +176,54 @@ class MyHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             config_cdash.LOG.info('Request for m4s {}'.format(request))
             if check_content_server(request):
                 local_file_path, http_headers = cache_manager.fetch_file(request, username, session_id)
+                T3=time.time()
+                request_t = T3 - start_time
+                config_cdash.LOG.info('T3 = {}'.format(T3))
+                #cache_manager.current_queue.put((request, username, session_id))
                 config_cdash.LOG.debug('M4S request: local {}, http_headers: {}'.format(local_file_path, http_headers))
                 self.send_response(HTTP_OK)
                 for header, header_value in http_headers.items():
                     self.send_header(header, header_value)
                 self.end_headers()
                 with open(local_file_path, 'rb') as request_file:
-                    start_time = timeit.default_timer()
+                    #start_time = timeit.default_timer()
                     self.wfile.write(request_file.read())
-                    request_time = timeit.default_timer() - start_time
+                    #T3=time.time()
+                    #request_t = T3 - start_time
+                    #config_cdash.LOG.info('T3 = {}'.format(T3))
                 request_size = stat(local_file_path).st_size
+                # If valid request sent
+                entry_id = datetime.datetime.now()
+                cursor = TH_CONN.cursor()
+                #Client_transfer=abs(float(time_c)-start_time)
+                #FMT = '%H:%M:%S.%f'
+                #Client_transfer = datetime.datetime.strptime(s_time, FMT) - datetime.datetime.strptime(time_c, FMT)
+                #secs = Client_transfer.total_seconds()
+                if time_c=='NULL':
+                    time_c=0
+                    Client_transfer=0
+                else:
+                    Client_transfer=abs(float(time_c)-start_time)
+                config_cdash.LOG.info('sent header time {}'.format(time_c))
+                config_cdash.LOG.info('start time {}'.format(start_time))
+                config_cdash.LOG.info('Client transfer time {}'.format(Client_transfer))
+                config_cdash.LOG.info('request time {}'.format(request_t))
+                if request_t=='NULL':
+                    request_t=0.0
+                if request_size=='NULL':
+                    request_size=0.0
+                request_size = float(request_size)*8
+                config_cdash.LOG.info('transfer size:{} '.format(request_size))
+                request_time=float(request_t+(Client_transfer*2))
+                throughput = float(request_size)/(request_time)
+                #config_cdash.LOG.info('Adding row to Throughput database : '
+                #                      'INSERT INTO THROUGHPUTDATA VALUES ({}, {}, {}, {}, {}, {}, {}, {},{},{});'.format(entry_id, username, session_id, request_id, request_size, request_time, throughput                                        ,client_throughput,'None','None'))
+                #cursor.execute('INSERT INTO THROUGHPUTDATA(ENTRYID, USERNAME, SESSIONID, REQUESTSIZE, REQUESTTIME, THROUGHPUT, C_THROUGHPUT) '
+                #                      'VALUES (?,?, ?, ?, ?, ?, ?);', (entry_id, username, session_id, request_size, request_time,throughput,client_throughput))
+                #TH_CONN.commit()
+                cache_manager.list_data.append((entry_id, username, session_id, request_size, request_time,throughput,client_throughput,None,None))
+                #config_cdash.LOG.info('list_data in the begining:{} '.format(cache_manager.list_data))
+                cache_manager.current_queue.put((request, username, session_id))
 
             else:
                 config_cdash.LOG.warning('Invalid video file request: {}'.format(request))
@@ -150,17 +231,6 @@ class MyHTTPRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.send_response(HTTP_NOT_FOUND)
             config_cdash.LOG.warning('Could not find file {}'.format(request))
             return
-        # If valid request sent
-        entry_id = datetime.datetime.now()
-        cursor = TH_CONN.cursor()
-        throughput = float(request_size)/request_time
-        config_cdash.LOG.info('Adding row to Throughput database : '
-                              'INSERT INTO THROUGHPUTDATA VALUES ({}, {}, {}, {}, {}, {}, {});'.format(
-            entry_id, username, session_id, request_id, request_size, request_time, throughput))
-        cursor.execute('INSERT INTO THROUGHPUTDATA(ENTRYID, USERNAME, SESSIONID, REQUESTSIZE, REQUESTTIME, THROUGHPUT) '
-                       'VALUES (?, ?, ?, ?, ?, ?);', (entry_id, username, session_id, request_size, request_time,
-                                                      throughput))
-        TH_CONN.commit()
 
 
 def parse_mpd(mpd_file, request, mpd_headers, client_id):
@@ -204,22 +274,25 @@ def make_sure_path_exists(path):
         if exception.errno != errno.EEXIST:
             raise
 
-
 def main():
     """ Main program wrapper """
+
     config_cdash.LOG = configure_cdash_log.configure_log(config_cdash.LOG_FILENAME, config_cdash.LOG_NAME,
                                                          config_cdash.LOG_LEVEL)
     global MPD_DICT
     global TH_CONN
+    #global D_CONN
     global cursor
-    # I add
+    config_cdash.LOG.info('Starting the cache in {} mode'.format(config_cdash.PREFETCH_SCHEME))
     if TH_CONN == None:
         TH_CONN = create_db.create_db(config_cdash.THROUGHPUT_DATABASE, config_cdash.THROUGHPUT_TABLES)
+    #if D_CONN == None:
+    #    D_CONN = create_db.create_db(config_cdash.DELTA_DATABASE, config_cdash.DELTA_TABLES)
     try:
         with open(config_cdash.MPD_DICT_JSON_FILE, 'rb') as infile:
             MPD_DICT = json.load(infile)
     except IOError:
-        config_cdash.LOG.warning('Could not find any MPD_ Json file')
+        config_cdash.LOG.warning('Starting Cache for first time. Could not find any MPD_json file. ')
     # Starting the Cache Manager
     global cache_manager
     config_cdash.LOG.info('Starting the Cache Manager')
@@ -234,6 +307,7 @@ def main():
     except KeyboardInterrupt:
         config_cdash.LOG.info('Terminating the Cache Manager')
         cache_manager.terminate()
+        return
 
 if __name__ == "__main__":
     sys.exit(main())
