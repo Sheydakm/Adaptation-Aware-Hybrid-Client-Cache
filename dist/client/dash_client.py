@@ -28,6 +28,8 @@ import config_client
 import dash_buffer
 from configure_log_file import configure_log_file, write_json
 import time
+import datetime
+
 try:
     WindowsError
 except NameError:
@@ -44,7 +46,10 @@ LIST = False
 PLAYBACK = DEFAULT_PLAYBACK
 DOWNLOAD = False
 SEGMENT_LIMIT = None
-
+download_rate = None
+sizes=[]
+seg_time=[]
+start=[]
 
 class DashPlayback:
     """
@@ -61,6 +66,9 @@ class DashPlayback:
 def get_mpd(url, mpd_opener):
     """ Module to download the MPD from the URL and save it to file"""
     try:
+        #T1=time.time()
+        #config_client.LOG.info("T1 = {}".format(T1))
+        #start.append(T1)
         connection = mpd_opener.open(url, timeout=10)
     except urllib2.HTTPError, error:
         config_client.LOG.error("Unable to download MPD file HTTP Error: %s" % error.code)
@@ -108,7 +116,11 @@ def id_generator(id_size=6):
 def download_segment(segment_url, dash_folder):
     """ Module to download the segment """
     try:
+        #time.sleep(2)
         segment_opener = get_opener()
+        #T1=time.time()
+        #config_client.LOG.info("T1 = {}".format(T1))
+        #start.append(T1)
         connection = segment_opener.open(segment_url)
     except urllib2.HTTPError, error:
         config_client.LOG.error("Unable to download DASH Segment {} HTTP Error:{} ".format(
@@ -128,27 +140,13 @@ def download_segment(segment_url, dash_folder):
         segment_file_handle.write(segment_data)
         if len(segment_data) < DOWNLOAD_CHUNK:
             break
+    T5=time.time()
+    config_client.LOG.info("T5 = {}".format(T5))
+    #time.sleep (5.0 / 1000.0);
     connection.close()
     segment_file_handle.close()
+    sizes.append(segment_size)
     return segment_size, segment_filename
-
-
-def get_media_all(domain, media_info, file_identifier, done_queue):
-    """ Download the media from the list of URL's in media
-    """
-    bandwidth, media_dict = media_info
-    media = media_dict[bandwidth]
-    media_start_time = timeit.default_timer()
-    for segment in [media.initialization] + media.url_list:
-        start_time = timeit.default_timer()
-        segment_url = urlparse.urljoin(domain, segment)
-        _, segment_file = download_segment(segment_url, file_identifier)
-        elapsed = timeit.default_timer() - start_time
-        if segment_file:
-            done_queue.put((bandwidth, segment_url, elapsed))
-    media_download_time = timeit.default_timer() - media_start_time
-    done_queue.put((bandwidth, 'STOP', media_download_time))
-    return None
 
 
 def make_sure_path_exists(path):
@@ -208,7 +206,11 @@ def start_playback(dp_object, domain, playback_type=None, download=False):
     segment_number = dp_object.video['start']
     while downloaded_duration < dp_object.playback_duration:
         config_client.LOG.info(" {}: Processing the segment {}".format(playback_type.upper(), segment_number))
-        write_json()
+        try:
+            write_json()
+        except IOError:
+            config_client.LOG.error('Unable to write to JSON {} to file'.format(config_client.JSON_HANDLE))
+
         if not previous_bitrate:
             previous_bitrate = current_bitrate
         if SEGMENT_LIMIT:
@@ -220,8 +222,10 @@ def start_playback(dp_object, domain, playback_type=None, download=False):
         if segment_number == dp_object.video['start']:
             current_bitrate = bitrates[0]
         else:
+            global download_rate
             if playback_type.upper() == "BASIC":
-                current_bitrate, average_dwn_time = basic_dash.basic_dash(segment_number, bitrates, average_dwn_time,
+                #global download_rate
+                current_bitrate, average_dwn_time, download_rate = basic_dash.basic_dash(segment_number, bitrates, average_dwn_time,
                                                                           recent_download_sizes,
                                                                           previous_segment_times, current_bitrate)
 
@@ -232,10 +236,13 @@ def start_playback(dp_object, domain, playback_type=None, download=False):
             else:
                 config_client.LOG.error("Unknown playback type:{}. Continuing with basic playback".format(
                     playback_type))
-                current_bitrate, average_dwn_time = basic_dash.basic_dash(segment_number, bitrates, average_dwn_time,
+                #global download_rate
+                current_bitrate, average_dwn_time, download_rate = basic_dash.basic_dash(segment_number, bitrates, average_dwn_time,
                                                                           segment_download_time, current_bitrate)
         segment_path = read_mpd.get_segment_path(dp_object.video, dp_object.playback_duration,current_bitrate,
                                                  segment_number)
+        #segment_path = "bunny_88783bps/BigBuckBunny_4s1.m4s"
+        #segment_path = "bunny_88783bps/BigBuckBunny_4s1.m4s"
         segment_url = urlparse.urljoin(domain, segment_path)
         config_client.LOG.info("{}: Segment URL = {}".format(playback_type.upper(), segment_url))
         if delay:
@@ -245,14 +252,16 @@ def start_playback(dp_object, domain, playback_type=None, download=False):
                 time.sleep(1)
             delay = 0
             config_client.LOG.debug("SLEPT for {}seconds ".format(time.time() - delay_start))
-        start_time = timeit.default_timer()
         try:
             segment_size, segment_filename = download_segment(segment_url, file_identifier)
             config_client.LOG.info("{}: Downloaded segment {}".format(playback_type.upper(), segment_url))
         except IOError, e:
             config_client.LOG.error("Unable to save segment %s" % e)
             return None
-        segment_download_time = timeit.default_timer() - start_time
+        T4=time.time()
+        config_client.LOG.info("T4 = {}".format(T4))
+        segment_download_time = T4 - start[-1]
+        seg_time.append(segment_download_time)
         previous_segment_times.append(segment_download_time)
         recent_download_sizes.append(segment_size)
         # Updating the JSON information
@@ -314,16 +323,16 @@ def create_arguments(parser):
     parser.add_argument('-m', '--MPD',                   
                         help="Url to the MPD File")
     parser.add_argument('-l', '--LIST', action='store_true',
-                        help="List all the representations")
+                        help="List all the representations without downloading the video file.")
     parser.add_argument('-p', '--PLAYBACK',
                         default=DEFAULT_PLAYBACK,
                         help="Playback type (basic)")
     parser.add_argument('-n', '--SEGMENT_LIMIT',
                         default=SEGMENT_LIMIT,
-                        help="The Segment number limit")
+                        help="The Segment number limit. Limits the number of segments taht are downloaded.")
     parser.add_argument('-d', '--DOWNLOAD', action='store_true',
                         default=False,
-                        help="Keep the video files after playback")
+                        help="Keep the video files after playback. When we set to False all the files are deleted after the video session.")
 
 
 def get_opener():
@@ -331,12 +340,47 @@ def get_opener():
     Module to create an Urllib2 opener with the cookies
     :return:
     """
+    global download_rate
+    Cookie_dict=config_client.COOKIE_FIELDS
+    #config_client.LOG.info("no time = {}".format(Cookie_dict))
+    T1=time.time()
+    config_client.LOG.info("T1 = {}".format(T1))
+    start.append(T1)
+    Cookie_dict['Time']=T1
+    config_client.LOG.info("Time added = {}".format(Cookie_dict['Time']))
+    #Cookie_dict['Time'] = str(datetime.datetime.time(datetime.datetime.now()))
+    #config_client.LOG.info("time added = {}".format(Cookie_dict['Time']))
+    if download_rate:
+        Cookie_dict['Throughput']= download_rate
+        config_client.LOG.info("Throughput added = {}".format(Cookie_dict['Throughput']))
+    if sizes:
+        Cookie_dict['segment_size']= (sizes[-1]*8)
+        config_client.LOG.info("segment_size added = {}".format(Cookie_dict['segment_size']))
+    if seg_time:
+         Cookie_dict['seg_time']= seg_time[-1]
+         config_client.LOG.info("segment_time added = {}".format(Cookie_dict['seg_time']))
     url_opener = urllib2.build_opener()
-    config_client.LOG.info("Cookie info = {}".format(config_client.COOKIE_FIELDS))
-    for cookie_field in config_client.COOKIE_FIELDS:
-        url_opener.addheaders.append((cookie_field,
-                                      config_client.COOKIE_FIELDS[cookie_field]))
+    config_client.LOG.info("Cookie info = {}".format(Cookie_dict))
+    for cookie_field in Cookie_dict:
+        config_client.LOG.info("Cookie for append = {}".format(cookie_field))
+        url_opener.addheaders.append((cookie_field,Cookie_dict[cookie_field]))
     return url_opener
+
+def get_opener_mpd():
+    """
+    Module to create an Urllib2 opener with the cookies
+    :return:
+    """
+
+    url_opener = urllib2.build_opener()
+    Cookie_dict=config_client.COOKIE_FIELDS
+    config_client.LOG.info("Cookie info = {}".format(Cookie_dict))
+    for cookie_field in Cookie_dict:
+        config_client.LOG.info("Cookie for append = {}".format(cookie_field))
+        url_opener.addheaders.append((cookie_field,Cookie_dict[cookie_field]))
+    return url_opener
+
+
 
 
 def main():
@@ -354,7 +398,7 @@ def main():
         return None
     config_client.LOG.info('Downloading MPD file %s' % MPD)
     # Retrieve the MPD files for the video
-    mpd_opener = get_opener()
+    mpd_opener = get_opener_mpd()
     mpd_file = get_mpd(MPD, mpd_opener)
     domain = get_domain_name(MPD)
     # Reading the MPD file created

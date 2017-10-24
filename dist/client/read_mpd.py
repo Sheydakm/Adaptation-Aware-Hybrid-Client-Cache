@@ -52,10 +52,13 @@ def get_playback_time(playback_duration):
     total_duration = 0
     for count, val in enumerate(numbers):
         if count == 0:
+            # seconds 
             total_duration += float(val)
         elif count == 1:
+            # minutes
             total_duration += float(val) * 60
         elif count == 2:
+            # hours
             total_duration += float(val) * 60 * 60
     return total_duration
 
@@ -85,6 +88,7 @@ class DashPlayback:
                       'start': None,
                       'timescale': None,
                       'initialization': None,
+                      # Video segmnet duration: calcluated as duration/timescale from the MPD file
                       'duration': None,
                       'bandwidth_list': []
                       }
